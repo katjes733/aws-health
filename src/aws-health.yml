@@ -166,7 +166,7 @@ Resources:
               logger.setLevel(logging.INFO)
 
           def lambda_handler(event, context):
-              logger.info("event: %s", {event})
+              logger.info("event: %s", event)
               if event and "detail" in event:
                   send_message(event['detail'])
               else:
@@ -183,7 +183,7 @@ Resources:
                       logger.info("No new events and therefore nothing to send")
 
           def send_message(eD):
-              logger.info("eventDetail: %s", {eD})
+              logger.info("eventDetail: %s", eD)
               if "event" in eD:
                   ev = eD['event']
               else:
@@ -259,9 +259,9 @@ Resources:
                   response.read()
                   logger.info("Message posted")
               except HTTPError as err:
-                  logger.error("Request failed: %s %s", {err.code}, {err.reason})
+                  logger.error("Request failed: %s %s", err.code, err.reason)
               except URLError as err:
-                  logger.error("Server connection failed: %s", {err.reason})
+                  logger.error("Server connection failed: %s", err.reason)
 
       Handler: "index.lambda_handler"
       Runtime: python3.9
