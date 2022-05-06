@@ -1,0 +1,205 @@
+# MIT License
+#
+# Copyright (c) 2022 Martin Macecek
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWS Health Notification to Teams
+
+# -----------------------------------------------------------------------------
+# Parameters
+# -----------------------------------------------------------------------------
+Parameters:
+  WebHookUrl:
+    Description: The Webhook URL
+    Type: String
+    Default: ''
+  ExecutionRate:
+    Description: The execution rate in minutes
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 60
+
+# -----------------------------------------------------------------------------
+# Conditions
+# -----------------------------------------------------------------------------
+Conditions:
+  IsOneMinute: !Equals [!Ref ExecutionRate, 1]
+
+# -----------------------------------------------------------------------------
+# Resources
+# -----------------------------------------------------------------------------
+Resources: 
+  AwsHealthNotificationLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: 'AwsHealthNotificationLambdaRole'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: 'AwsHealthNotificationLambdaPolicy'
+          PolicyDocument:
+            Id: 'AwsHealthNotificationLambdaPolicyDocument'
+            Version: 2012-10-17
+            Statement:
+              - Sid: Logging
+                Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+              - Sid: HealthReadAll
+                Effect: Allow
+                Action:
+                  - 'health:DescribeEvents'
+                Resource: '*'
+              - Sid: HealthReadEvents
+                Effect: Allow
+                Action:
+                  - 'health:DescribeEventDetails'
+                Resource: 'arn:aws:health:*::event/*/*/*'
+  AwsHealthNotificationLambdaLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      RetentionInDays: 7
+      LogGroupName: '/aws/lambda/AwsHealthNotification'
+  AwsHealthNotificationLambda:
+    Type: AWS::Lambda::Function
+    DependsOn: AwsHealthNotificationLambdaLogGroup
+    Properties:
+      FunctionName: AwsHealthNotification
+      Code: 
+        ZipFile: |
+          import json, os, logging, boto3
+          import datetime as dt
+          from datetime import timedelta
+          from urllib.request import Request, urlopen
+          from urllib.error import URLError, HTTPError
+
+          # Microsoft Teams url webhook
+          HOOK_URL = os.environ['HookUrl']
+          CHECK_TIME = int(os.environ['CheckTime'])
+
+          # set logging
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+            logger.info(f"event: {event}")
+            if event and "detail" in event:
+              send_message(event['detail'])
+            else:
+              hClient = boto3.client('health')
+              toDt = dt.datetime.now()
+              fromDt = toDt - timedelta(minutes=CHECK_TIME)
+              allEvents = hClient.describe_events(filter={'eventTypeCategories': ['issue'], 'lastUpdatedTimes': [{'from': fromDt, 'to': toDt}]})['events']
+              eventArns = list(map(lambda event: event['arn'],[x for x in allEvents if "eventScopeCode" in x and x['eventScopeCode'] == "PUBLIC"]))
+              if eventArns:
+                eventDetails = hClient.describe_event_details(eventArns=eventArns)['successfulSet']
+                for eventDetail in eventDetails:
+                  send_message(eventDetail)
+              else:
+                logger.info("No new events and therefore nothing to send")
+            
+          def send_message(eventDetail):
+            logger.info(f"eventDetail: {eventDetail}")
+            if "event" in eventDetail:
+              event = eventDetail['event']
+            else:
+              event = eventDetail
+            latestEventDescription = list(filter(None, eventDetail['eventDescription']['latestDescription'].split('\n')))[-1]
+            c = "ff0000" if event['statusCode']=="open" else "00ff00"
+            dt_f = event['lastUpdatedTime'].strftime('%Y-%m-%d %H:%M:%S').split(' ')
+            message = {
+              "@context": "https://schema.org/extensions",
+              "@type": "MessageCard",
+              "themeColor": f"{c}",
+              "title": f"{event['statusCode'].capitalize()} Health Notification for {event['service']}",
+              "sections": [{
+                  "activityTitle": f"**{event['eventTypeCode']}** is in Status **{event['statusCode']}**",
+                  "activitySubtitle": f"{dt_f[0]}, {dt_f[1]} UTC",
+                  "facts": [
+                      {"name": "Service:", "value": f"{event['service']}"},
+                      {"name": "Region:", "value": f"{event['region']}"},
+                      {"name": "Event Type Code:", "value": f"{event['eventTypeCode']}"},
+                      {"name": "Status:", "value": f"{event['statusCode']}"},
+                      {"name": "Latest Description:", "value": f"{latestEventDescription}"}
+                  ]
+              }],
+              "summary": f"Service {event['eventTypeCode']}"
+              ,
+              "potentialAction" : [{
+                  "@type": "OpenUri",
+                  "name": "Go to Issue",
+                  "targets": [
+                      {
+                          "os": "default",
+                          "uri": f"https://phd.aws.amazon.com/phd/home?region={event['region']}#/dashboard/open-issues?eventID={event['arn']}&eventTab=details"
+                      }
+                  ]
+              }]
+            }
+            request = Request(
+                HOOK_URL,
+                json.dumps(message).encode('utf-8'))
+            try:
+                response = urlopen(request)
+                response.read()
+                logger.info("Message posted")
+            except HTTPError as err:
+                logger.error(f"Request failed: {err.code} {err.reason}")
+            except URLError as err:
+                logger.error(f"Server connection failed: {err.reason}")
+
+      Handler: "index.lambda_handler"
+      Runtime: python3.8
+      MemorySize: 128
+      Timeout: 60
+      Role: !GetAtt AwsHealthNotificationLambdaRole.Arn
+      Environment:
+        Variables:
+          HookUrl: !Sub '${WebHookUrl}'
+          CheckTime: !Sub '${ExecutionRate}'
+  EventRuleOnSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${AWS::StackName}-EventRuleOnSchedule'
+      ScheduleExpression: !If [IsOneMinute, !Sub 'rate(${ExecutionRate} minute)', !Sub 'rate(${ExecutionRate} minutes)']
+      Targets:
+        - Arn: !GetAtt AwsHealthNotificationLambda.Arn
+          Id: !Sub '${AWS::StackName}'
+          Input: "{}"
+  AwsHealthNotificationLambdaPermissions:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt AwsHealthNotificationLambda.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EventRuleOnSchedule.Arn
