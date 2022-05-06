@@ -273,11 +273,11 @@ Resources:
           TeamsHookUrl: !Sub '${TeamsHookUrl}'
           SlackHookUrl: !Sub '${SlackHookUrl}'
           CheckTime: !Sub '${ExecutionRate}'
-  EventRuleOnSchedule:
+  AwsHealthNotificationEventRuleOnSchedule:
     Type: AWS::Events::Rule
     Properties:
       Name: !Sub 
-        - '${ResourcePrefix}AwsHealthNotification-EventRuleOnSchedule'
+        - '${ResourcePrefix}AwsHealthNotificationEventRuleOnSchedule'
         - { ResourcePrefix: !If [UseSpecificResourcePrefix, !Ref ResourcePrefix, '${AWS::StackName}-'] }
       Description: Scheduled rule to trigger check for AWS Health
       ScheduleExpression: !If [IsOneMinute, !Sub 'rate(${ExecutionRate} minute)', !Sub 'rate(${ExecutionRate} minutes)']
@@ -285,10 +285,10 @@ Resources:
         - Arn: !GetAtt AwsHealthNotificationLambda.Arn
           Id: !Sub '${AWS::StackName}'
           Input: "{}"
-  AwsHealthNotificationLambdaPermissions:
+  AwsHealthNotificationLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties: 
       Action: lambda:InvokeFunction
       FunctionName: !GetAtt AwsHealthNotificationLambda.Arn
       Principal: events.amazonaws.com
-      SourceArn: !GetAtt EventRuleOnSchedule.Arn
+      SourceArn: !GetAtt AwsHealthNotificationEventRuleOnSchedule.Arn
