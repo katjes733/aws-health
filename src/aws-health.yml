@@ -40,7 +40,7 @@ Parameters:
   SlackHookUrl:
     Description: The Slack Hook URL
     Type: String
-    Default: 'https://hooks.slack.com/services/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'
+    Default: ''
     AllowedPattern: '^$|^https:\/\/[a-zA-Z0-9_\-\+]+(\.[a-zA-Z0-9_\-\+]+)+\/.+$'
   ExecutionRate:
     Description: The execution rate in minutes
