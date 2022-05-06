@@ -277,8 +277,9 @@ Resources:
     Type: AWS::Events::Rule
     Properties:
       Name: !Sub 
-        - '${ResourcePrefix}${AWS::StackName}-EventRuleOnSchedule'
-        - { ResourcePrefix: !If [UseSpecificResourcePrefix, !Ref ResourcePrefix, ''] }
+        - '${ResourcePrefix}AwsHealthNotification-EventRuleOnSchedule'
+        - { ResourcePrefix: !If [UseSpecificResourcePrefix, !Ref ResourcePrefix, '${AWS::StackName}-'] }
+      Description: Scheduled rule to trigger check for AWS Health
       ScheduleExpression: !If [IsOneMinute, !Sub 'rate(${ExecutionRate} minute)', !Sub 'rate(${ExecutionRate} minutes)']
       Targets:
         - Arn: !GetAtt AwsHealthNotificationLambda.Arn
