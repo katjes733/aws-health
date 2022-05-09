@@ -21,16 +21,6 @@
 # SOFTWARE.
 #
 
-variable "profile" {
-    description = "The AWS profile for deployment."
-    type        = string
-
-    validation {
-        condition     = trimspace(var.profile) != ""
-        error_message = "The profile must not be empty."
-    }
-}
-
 variable "aws_region" {
     description = "The AWS region for deployment."
     type        = string
