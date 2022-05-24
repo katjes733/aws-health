@@ -23,10 +23,16 @@
 
 aws_region = "us-east-1"
 
+tag_owner = "martin.macecek@rearc.io"
+
+tag_type = "Internal"
+
+tag_usage = "Playground"
+
 resource_prefix = "mac-re-"
 
 teams_hook_url = ""
 
-slack_hook_url = ""
+slack_hook_url = "https://hooks.slack.com/services/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"
 
 execution_rate = 1

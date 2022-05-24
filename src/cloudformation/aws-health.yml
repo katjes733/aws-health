@@ -32,6 +32,28 @@ Parameters:
     Type: String
     Default: 'mac-'
     AllowedPattern: ^$|^[a-z0-9-]{0,7}$
+  TagOwner:
+    Description: The owner tag for all supported resources
+    ConstraintDescription: "Must be a valid email address for the owner."
+    Type: String
+    AllowedPattern: ^[\w\.]+\@[\w]+\.[a-z]+$
+  TagType:
+    Description: The type tag for all supported resources
+    ConstraintDescription: "Must be one of the following values only: Internal or External."
+    Type: String
+    AllowedValues: 
+      - Internal
+      - External
+  TagUsage:
+    Description: The usage tag for all supported resources
+    ConstraintDescription: "Must be one of the following values only: Playground, Development, Qualification, Production or Control Tower."
+    Type: String
+    AllowedValues: 
+      - Playground
+      - Development
+      - Qualification
+      - Production
+      - Control Tower
   TeamsHookUrl:
     Description: The Teams Hook URL
     Type: String
@@ -48,6 +70,41 @@ Parameters:
     Default: 10
     MinValue: 1
     MaxValue: 60
+
+# -----------------------------------------------------------------------------
+# Metadata:
+# -----------------------------------------------------------------------------
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Health Configuration
+        Parameters:
+          - TeamsHookUrl
+          - SlackHookUrl
+          - ExecutionRate
+      - Label:
+          default: Deployment Configuration
+        Parameters:
+          - ResourcePrefix
+          - TagOwner
+          - TagType
+          - TagUsage
+    ParameterLabels:
+      TeamsHookUrl: 
+        default: Teams Webhook URL
+      SlackHookUrl: 
+        default: Slack Webhook URL
+      ExecutionRate: 
+        default: Execution Rate
+      ResourcePrefix:
+        default: Resource Prefix
+      TagOwner:
+        default: Tag Owner
+      TagType:
+        default: Tag Type
+      TagUsage:
+        default: Tag Usage
 
 # -----------------------------------------------------------------------------
 # Conditions
@@ -79,6 +136,14 @@ Resources:
         Version: 2012-10-17
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Tags:
+        - Key: Owner
+          Value: !Ref TagOwner
+        - Key: Type
+          Value: !Ref TagType
+        - Key: Usage
+          Value: !Ref TagUsage
+
   AwsHealthNotificationLambdaRolePolicy:
     Type: 'AWS::IAM::Policy'
     Metadata:
@@ -105,6 +170,7 @@ Resources:
         Version: 2012-10-17      
       Roles:
         - !Ref AwsHealthNotificationLambdaRole
+
   AwsHealthNotificationLambdaLogGroup:
     Type: 'AWS::Logs::LogGroup'
     Metadata:
@@ -117,6 +183,14 @@ Resources:
       LogGroupName: !Sub 
         - '/aws/lambda/${ResourcePrefix}AwsHealthNotification'
         - { ResourcePrefix: !If [UseSpecificResourcePrefix, !Ref ResourcePrefix, '${AWS::StackName}-' ] }
+      Tags:
+        - Key: Owner
+          Value: !Ref TagOwner
+        - Key: Type
+          Value: !Ref TagType
+        - Key: Usage
+          Value: !Ref TagUsage
+
   AwsHealthNotificationLambda:
     Type: AWS::Lambda::Function
     Metadata:
@@ -273,6 +347,14 @@ Resources:
           TeamsHookUrl: !Sub '${TeamsHookUrl}'
           SlackHookUrl: !Sub '${SlackHookUrl}'
           CheckTime: !Sub '${ExecutionRate}'
+      Tags:
+        - Key: Owner
+          Value: !Ref TagOwner
+        - Key: Type
+          Value: !Ref TagType
+        - Key: Usage
+          Value: !Ref TagUsage
+
   AwsHealthNotificationEventRuleOnSchedule:
     Type: AWS::Events::Rule
     Properties:
@@ -285,6 +367,7 @@ Resources:
         - Arn: !GetAtt AwsHealthNotificationLambda.Arn
           Id: !Sub '${AWS::StackName}'
           Input: "{}"
+
   AwsHealthNotificationLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties: 

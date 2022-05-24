@@ -42,7 +42,14 @@ terraform {
 }
 
 provider "aws" {
-  region  = var.aws_region
+    region  = var.aws_region
+    default_tags {
+        tags = {
+            Owner = var.tag_owner
+            Type  = var.tag_type
+            Usage = var.tag_usage
+        }
+    }
 }
 
 data "aws_partition" "current" {}
