@@ -167,7 +167,7 @@ Resources:
 
           def lambda_handler(event, context):
               logger.info("event: %s", event)
-              if event and "detail" in event:
+              if event and "detail" in event and event['detail']:
                   send_message(event['detail'])
               else:
                   hClient = boto3.client('health')

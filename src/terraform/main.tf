@@ -106,7 +106,7 @@ resource "aws_cloudwatch_log_group" "aws_health_notification_lambda_log_group" {
 
 data "archive_file" "aws_health_package" {
     type = "zip"
-    source_file = "${path.module}/python/aws_health.py"
+    source_file = "${path.module}/../python/aws_health.py"
     output_path = "${path.module}/.package/aws_health.zip"
 }
 

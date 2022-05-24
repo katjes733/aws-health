@@ -23,11 +23,14 @@ SOFTWARE.
 
 Lambda function for aws health
 """
-import json, os, logging, boto3
+import json
+import os
+import logging
 import datetime as dt
 from datetime import timedelta
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
+import boto3
 
 # Microsoft Teams url webhook
 TEAMS_HOOK_URL = os.environ['TeamsHookUrl']
@@ -57,110 +60,136 @@ def lambda_handler(event, context):
     """
     logger.info("event: %s", event)
     logger.debug("context: %s", context)
-    if event and "detail" in event:
+    if event and "detail" in event and event['detail']:
         send_message(event['detail'])
     else:
-        hClient = boto3.client('health')
-        toDt = dt.datetime.now()
-        fromDt = toDt - timedelta(minutes=CHECK_INTERVAL)
-        allEvents = hClient.describe_events(filter={'eventTypeCategories': ['issue'], 'lastUpdatedTimes': [{'from': fromDt, 'to': toDt}]})['events']
-        eventArns = list(map(lambda event: event['arn'],[x for x in allEvents if "eventScopeCode" in x and x['eventScopeCode'] == "PUBLIC"]))
-        if eventArns:
-            eDs = hClient.describe_event_details(eventArns=eventArns)['successfulSet']
-            for eD in eDs:
-                send_message(eD)
+        health_client = boto3.client('health')
+        now = dt.datetime.now()
+        start_time = now - timedelta(minutes=CHECK_INTERVAL)
+        all_events = health_client.describe_events(filter={'eventTypeCategories': ['issue'], \
+            'lastUpdatedTimes': [{'from': start_time, 'to': now}]})['events']
+        event_arns = list(map(lambda event: event['arn'],[x for x in all_events \
+            if "eventScopeCode" in x and x['eventScopeCode'] == "PUBLIC"]))
+        if event_arns:
+            event_details = \
+                health_client.describe_event_details(event_arns=event_arns)['successfulSet']
+            for event_detail in event_details:
+                send_message(event_detail)
         else:
             logger.info("No new events and therefore nothing to send")
 
-def send_message(eD):
+def send_message(event_detail):
     """ Sends a message
 
     Args:
-        eD (dictionary): the event detail
+        event_detail (dictionary): the event detail
     """
-    logger.info("eventDetail: %s", eD)
-    if "event" in eD:
-        ev = eD['event']
+    logger.info("eventDetail: %s", event_detail)
+    if TEAMS_HOOK_URL or SLACK_HOOK_URL:
+        if "event" in event_detail:
+            event = event_detail['event']
+        else:
+            event = event_detail
+        color = "ff0000" if event['statusCode']=="open" else "00ff00"
+        event_time = event['lastUpdatedTime'].strftime('%Y-%m-%d %H:%M:%S').split(' ')
+        last_event_description = list(filter(None, \
+            event_detail['eventDescription']['latestDescription'].split('\n')))[-1]
+        url = f"https://phd.aws.amazon.com/phd/home?region=" \
+            f"{event['region']}#/dashboard/open-issues?eventID={event['arn']}&eventTab=details"
+        if TEAMS_HOOK_URL:
+            send_message_to_teams(event, last_event_description, color, event_time, url)
+        if SLACK_HOOK_URL:
+            send_message_to_slack(event, last_event_description, color, event_time, url)
     else:
-        ev = eD
-    c = "ff0000" if ev['statusCode']=="open" else "00ff00"
-    dt_f = ev['lastUpdatedTime'].strftime('%Y-%m-%d %H:%M:%S').split(' ')
-    lED = list(filter(None, eD['eventDescription']['latestDescription'].split('\n')))[-1]
-    iUrl = f"https://phd.aws.amazon.com/phd/home?region={ev['region']}#/dashboard/open-issues?eventID={ev['arn']}&eventTab=details"
-    if TEAMS_HOOK_URL:
-        send_message_to_teams(ev, lED, c, dt_f, iUrl)
-    if SLACK_HOOK_URL:
-        send_message_to_slack(ev, lED, c, dt_f, iUrl)
+        logger.info("Neither Teams nor Slack URL are set; therefore no further processing")
 
-def send_message_to_teams(ev, lED, c, dt_f, iUrl):
+def send_message_to_teams(event, last_event_description, color, event_time, url):
     """ send the message to teams
 
     Args:
-        ev (dictionary): the event
-        lED (string): the latest event description
+        event (dictionary): the event
+        last_event_description (string): the latest event description
         c (string): the color (hex coded)
-        dt_f (array): array of formatted date and time
-        iUrl (string): the issue url
+        event_time (array): array of formatted date and time
+        url (string): the issue url
     """
     message = {
         "@context": "https://schema.org/extensions",
         "@type": "MessageCard",
-        "themeColor": f"{c}",
-        "title": f"{ev['statusCode'].capitalize()} Health Notification for {ev['service']}",
+        "themeColor": f"{color}",
+        "title": f"{event['statusCode'].capitalize()} Health Notification for {event['service']}",
         "sections": [{
-            "activityTitle": f"**{ev['eventTypeCode']}** is in Status **{ev['statusCode']}**",
-            "activitySubtitle": f"{dt_f[0]}, {dt_f[1]} UTC",
+            "activityTitle": f"**{event['eventTypeCode']}** is in Status **{event['statusCode']}**",
+            "activitySubtitle": f"{event_time[0]}, {event_time[1]} UTC",
             "facts": [
-                {"name": "Service:", "value": f"{ev['service']}"},
-                {"name": "Region:", "value": f"{ev['region']}"},
-                {"name": "Event Type Code:", "value": f"{ev['eventTypeCode']}"},
-                {"name": "Status:", "value": f"{ev['statusCode']}"},
-                {"name": "Latest Description:", "value": f"{lED}"}
+                {"name": "Service:", "value": f"{event['service']}"},
+                {"name": "Region:", "value": f"{event['region']}"},
+                {"name": "Event Type Code:", "value": f"{event['eventTypeCode']}"},
+                {"name": "Status:", "value": f"{event['statusCode']}"},
+                {"name": "Latest Description:", "value": f"{last_event_description}"}
             ]
         }],
-        "summary": f"Service {ev['eventTypeCode']}",
+        "summary": f"Service {event['eventTypeCode']}",
         "potentialAction" : [{
-            "@type": "OpenUri", "name": "Go to Issue", "targets": [{"os": "default", "uri": iUrl}]
+            "@type": "OpenUri", "name": "Go to Issue", "targets": [{"os": "default", "uri": url}]
         }]
     }
     send_message_to_webhook(TEAMS_HOOK_URL, message)
 
-def send_message_to_slack(ev, lED, c, dt_f, iUrl):
+def send_message_to_slack(event, last_event_description, color, event_time, url):
     """ send the message to slack
 
     Args:
-        ev (dictionary): the event
-        lED (string): the latest event description
+        event (dictionary): the event
+        last_event_description (string): the latest event description
         c (string): the color (hex coded)
-        dt_f (array): array of formatted date and time
-        iUrl (string): the issue url
+        event_time (array): array of formatted date and time
+        url (string): the issue url
     """
-    message = {
-        "attachments": [
-            {
-                "color": c,
-                "blocks": [
-                    {"type": "header", "text": {"type": "plain_text", "text": f"{ev['statusCode'].capitalize()} Health Notification for {ev['service']}"}},
-                    {"type": "section", "text": {"type": "mrkdwn", "text": f"*{ev['eventTypeCode']}* is in Status *{ev['statusCode']}*"}},
-                    {"type": "context", "elements": [{"type": "mrkdwn", "text": f"{dt_f[0]}, {dt_f[1]} UTC"}]},
-                    {"type": "divider"},
-                    {"type": "section", "fields": [
-                            {"type": "mrkdwn", "text": "*Service:*"}, {"type": "plain_text", "text": f"{ev['service']}"},
-                            {"type": "mrkdwn", "text": "*Region:*"}, {"type": "plain_text", "text": f"{ev['region']}"},
-                            {"type": "mrkdwn", "text": "*Event Type Code:*"}, {"type": "plain_text", "text": f"{ev['eventTypeCode']}"},
-                            {"type": "mrkdwn", "text": "*Status:*"}, {"type": "plain_text", "text": f"{ev['statusCode']}"},
-                            {"type": "mrkdwn", "text": "*Latest Description:*"}, {"type": "plain_text", "text": f"{lED}"}
-                        ]
-                    },
-                    {"type": "divider"},
-                    {"type": "actions", "elements": [
-                            {"type": "button", "text": {"type": "plain_text", "text": "Go to Issue"}, "url": iUrl, "style": "primary"}
-                        ]
-                    }
-                ]
-            }
-        ]
-    }
+    message = {"attachments": [{
+        "color": color,
+        "blocks": [{
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": \
+                    f"{event['statusCode'].capitalize()} Health Notification for {event['service']}"
+            }}, {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*{event['eventTypeCode']}* is in Status *{event['statusCode']}*"
+            }}, {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": f"{event_time[0]}, {event_time[1]} UTC"}]
+            }, {
+            "type": "divider"
+            }, {
+            "type": "section", "fields": [
+                {"type": "mrkdwn", "text": "*Service:*"},
+                {"type": "plain_text", "text": f"{event['service']}"},
+                {"type": "mrkdwn", "text": "*Region:*"},
+                {"type": "plain_text", "text": f"{event['region']}"},
+                {"type": "mrkdwn", "text": "*Event Type Code:*"},
+                {"type": "plain_text", "text": f"{event['eventTypeCode']}"},
+                {"type": "mrkdwn", "text": "*Status:*"},
+                {"type": "plain_text", "text": f"{event['statusCode']}"},
+                {"type": "mrkdwn", "text": "*Latest Description:*"},
+                {"type": "plain_text", "text": f"{last_event_description}"}
+            ]}, {
+            "type": "divider"
+            },{
+            "type": "actions",
+            "elements": [{
+                "type": "button",
+                "text": {
+                    "type": "plain_text",
+                    "text": "Go to Issue"},
+                "url": url,
+                "style": "primary"}
+            ]}
+        ]}
+    ]}
     send_message_to_webhook(SLACK_HOOK_URL, message)
 
 def send_message_to_webhook(url, message):
