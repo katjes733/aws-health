@@ -22,18 +22,34 @@
 #
 
 terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 3.27"
+    required_providers {
+        aws = {
+            source  = "hashicorp/aws"
+            version = "~> 4.13.0"
+        }
     }
-  }
 
-  required_version = ">= 0.14.9"
+    required_version = ">= 0.14.9"
+
+    backend "s3" {
+        bucket         = "rearc-terraform-state-bucket-275279264324-us-east-1"
+        key            = "state/terraform.tfstate"
+        region         = "us-east-1"
+        encrypt        = true
+        kms_key_id     = "alias/rearc-terraform-state-bucket-key"
+        dynamodb_table = "rearc-terraform-state"
+    }
 }
 
 provider "aws" {
-  region  = var.aws_region
+    region  = var.aws_region
+    default_tags {
+        tags = {
+            Owner = var.tag_owner
+            Type  = var.tag_type
+            Usage = var.tag_usage
+        }
+    }
 }
 
 data "aws_partition" "current" {}
@@ -97,8 +113,8 @@ resource "aws_cloudwatch_log_group" "aws_health_notification_lambda_log_group" {
 
 data "archive_file" "aws_health_package" {
     type = "zip"
-    source_dir = "${path.module}/python/"
-    output_path = "${path.module}/.package/aws_health_package.zip"
+    source_file = "${path.module}/../python/aws_health.py"
+    output_path = "${path.module}/.package/aws_health.zip"
 }
 
 resource "aws_lambda_function" "aws_health_notification_lambda" {
@@ -107,8 +123,9 @@ resource "aws_lambda_function" "aws_health_notification_lambda" {
     ]
     function_name = "${local.aws_health_notification_lambda_function_name}"
     architectures = local.is_arm_supported_region ? ["arm64"] : ["x86_64"]
-    filename = "${path.module}/.package/aws_health_package.zip"
-    handler = "index.lambda_handler"
+    filename = "${path.module}/.package/aws_health.zip"
+    source_code_hash = data.archive_file.aws_health_package.output_base64sha256
+    handler = "aws_health.lambda_handler"
     runtime = "python3.9"
     memory_size = 128
     timeout = 60
