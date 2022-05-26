@@ -33,6 +33,6 @@ resource_prefix = "mac-re-"
 
 teams_hook_url = ""
 
-slack_hook_url = "https://hooks.slack.com/services/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"
+slack_hook_url = ""
 
 execution_rate = 1

@@ -72,7 +72,7 @@ def lambda_handler(event, context):
             if "eventScopeCode" in x and x['eventScopeCode'] == "PUBLIC"]))
         if event_arns:
             event_details = \
-                health_client.describe_event_details(event_arns=event_arns)['successfulSet']
+                health_client.describe_event_details(eventArns=event_arns)['successfulSet']
             for event_detail in event_details:
                 send_message(event_detail)
         else:
