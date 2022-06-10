@@ -26,10 +26,10 @@ Lambda function for aws health
 import json
 import os
 import logging
-import datetime as dt
 from datetime import timedelta
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
+from dateutil import parser
 import boto3
 
 # Microsoft Teams url webhook
@@ -64,7 +64,7 @@ def lambda_handler(event, context):
         send_message(event['detail'])
     else:
         health_client = boto3.client('health')
-        now = dt.datetime.now()
+        now = parser.parse(event['time'])
         start_time = now - timedelta(minutes=CHECK_INTERVAL)
         all_events = health_client.describe_events(filter={'eventTypeCategories': ['issue'], \
             'lastUpdatedTimes': [{'from': start_time, 'to': now}]})['events']
@@ -92,18 +92,26 @@ def send_message(event_detail):
             event = event_detail
         color = "ff0000" if event['statusCode']=="open" else "00ff00"
         event_time = event['lastUpdatedTime'].strftime('%Y-%m-%d %H:%M:%S').split(' ')
-        last_event_description = list(filter(None, \
-            event_detail['eventDescription']['latestDescription'].split('\n')))[-1]
+        event_list = event_detail['eventDescription']['latestDescription'].split('\n')
+        last_event_description = list(filter(lambda entry: re.search("^\[.*\].*", entry), \
+            event_list))[-1]
+        impacted_services_descriptions = list(filter(lambda entry: re.search("^The following AWS services.*", entry), \
+            event_list))
+        impacted_services = event['service']
+        if impacted_services_descriptions:
+            impacted_services_elements = re.split(r':\s?', impacted_services_descriptions[-1])
+            impacted_services_list = re.sub(',\s?', '\n• ', impacted_services_elements[1].replace(".", ""))
+            impacted_services = f"{impacted_services_elements[0]}:\n• {impacted_services_list}"
         url = f"https://phd.aws.amazon.com/phd/home?region=" \
             f"{event['region']}#/dashboard/open-issues?eventID={event['arn']}&eventTab=details"
         if TEAMS_HOOK_URL:
-            send_message_to_teams(event, last_event_description, color, event_time, url)
+            send_message_to_teams(event, last_event_description, impacted_services, color, event_time, url)
         if SLACK_HOOK_URL:
-            send_message_to_slack(event, last_event_description, color, event_time, url)
+            send_message_to_slack(event, last_event_description, impacted_services, color, event_time, url)
     else:
         logger.info("Neither Teams nor Slack URL are set; therefore no further processing")
 
-def send_message_to_teams(event, last_event_description, color, event_time, url):
+def send_message_to_teams(event, last_event_description, impacted_services, color, event_time, url):
     """ send the message to teams
 
     Args:
@@ -126,7 +134,8 @@ def send_message_to_teams(event, last_event_description, color, event_time, url)
                 {"name": "Region:", "value": f"{event['region']}"},
                 {"name": "Event Type Code:", "value": f"{event['eventTypeCode']}"},
                 {"name": "Status:", "value": f"{event['statusCode']}"},
-                {"name": "Latest Description:", "value": f"{last_event_description}"}
+                {"name": "Latest Description:", "value": f"{last_event_description}"},
+                {"name": "Affected AWS Services:", "value": f"{impacted_services}"}
             ]
         }],
         "summary": f"Service {event['eventTypeCode']}",
@@ -136,7 +145,7 @@ def send_message_to_teams(event, last_event_description, color, event_time, url)
     }
     send_message_to_webhook(TEAMS_HOOK_URL, message)
 
-def send_message_to_slack(event, last_event_description, color, event_time, url):
+def send_message_to_slack(event, last_event_description, impacted_services, color, event_time, url):
     """ send the message to slack
 
     Args:
@@ -173,9 +182,13 @@ def send_message_to_slack(event, last_event_description, color, event_time, url)
                 {"type": "mrkdwn", "text": "*Event Type Code:*"},
                 {"type": "plain_text", "text": f"{event['eventTypeCode']}"},
                 {"type": "mrkdwn", "text": "*Status:*"},
-                {"type": "plain_text", "text": f"{event['statusCode']}"},
+                {"type": "plain_text", "text": f"{event['statusCode']}"}
+            ]}, {
+            "type": "section", "fields": [
                 {"type": "mrkdwn", "text": "*Latest Description:*"},
-                {"type": "plain_text", "text": f"{last_event_description}"}
+                {"type": "plain_text", "text": f"{last_event_description}"},
+                {"type": "mrkdwn", "text": "*Affected AWS services:*"},
+                {"type": "mrkdwn", "text": f"{impacted_services}"}
             ]}, {
             "type": "divider"
             },{
