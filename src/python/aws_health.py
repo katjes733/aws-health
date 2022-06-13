@@ -26,15 +26,14 @@ Lambda function for aws health
 import json
 import os
 import logging
+import re
 from datetime import timedelta
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from dateutil import parser
 import boto3
 
-# Microsoft Teams url webhook
 TEAMS_HOOK_URL = os.environ['TeamsHookUrl']
-# Slack url webhook
 SLACK_HOOK_URL = os.environ['SlackHookUrl']
 CHECK_INTERVAL = int(os.environ['CheckTime'])
 
@@ -61,7 +60,7 @@ def lambda_handler(event, context):
     logger.info("event: %s", event)
     logger.debug("context: %s", context)
     if event and "detail" in event and event['detail']:
-        send_message(event['detail'])
+        prepare_message(event['detail'])
     else:
         health_client = boto3.client('health')
         now = parser.parse(event['time'])
@@ -74,11 +73,11 @@ def lambda_handler(event, context):
             event_details = \
                 health_client.describe_event_details(eventArns=event_arns)['successfulSet']
             for event_detail in event_details:
-                send_message(event_detail)
+                prepare_message(event_detail)
         else:
             logger.info("No new events and therefore nothing to send")
 
-def send_message(event_detail):
+def prepare_message(event_detail):
     """ Sends a message
 
     Args:
@@ -93,31 +92,35 @@ def send_message(event_detail):
         color = "ff0000" if event['statusCode']=="open" else "00ff00"
         event_time = event['lastUpdatedTime'].strftime('%Y-%m-%d %H:%M:%S').split(' ')
         event_list = event_detail['eventDescription']['latestDescription'].split('\n')
-        last_event_description = list(filter(lambda entry: re.search("^\[.*\].*", entry), \
+        last_event_description = list(filter(lambda entry: re.search(r"^\[.*\].*", entry), \
             event_list))[-1]
-        impacted_services_descriptions = list(filter(lambda entry: re.search("^The following AWS services.*", entry), \
-            event_list))
+        impacted_services_descriptions = list(filter(lambda entry: \
+            re.search(r"^The following AWS services.*", entry), event_list))
         impacted_services = event['service']
         if impacted_services_descriptions:
             impacted_services_elements = re.split(r':\s?', impacted_services_descriptions[-1])
-            impacted_services_list = re.sub(',\s?', '\n• ', impacted_services_elements[1].replace(".", ""))
+            impacted_services_list = re.sub(r',\s?', '\n• ', \
+                impacted_services_elements[1].replace(".", ""))
             impacted_services = f"{impacted_services_elements[0]}:\n• {impacted_services_list}"
         url = f"https://phd.aws.amazon.com/phd/home?region=" \
             f"{event['region']}#/dashboard/open-issues?eventID={event['arn']}&eventTab=details"
         if TEAMS_HOOK_URL:
-            send_message_to_teams(event, last_event_description, impacted_services, color, event_time, url)
+            prepare_message_for_teams(event, last_event_description, \
+                impacted_services, color, event_time, url)
         if SLACK_HOOK_URL:
-            send_message_to_slack(event, last_event_description, impacted_services, color, event_time, url)
+            prepare_message_for_slack(event, last_event_description, \
+                impacted_services, color, event_time, url)
     else:
         logger.info("Neither Teams nor Slack URL are set; therefore no further processing")
 
-def send_message_to_teams(event, last_event_description, impacted_services, color, event_time, url):
+def prepare_message_for_teams(event, last_event_description, impacted_services, color, event_time, url):
     """ send the message to teams
 
     Args:
         event (dictionary): the event
         last_event_description (string): the latest event description
-        c (string): the color (hex coded)
+        impacted_services (string): the impacted services (pre-formatted)
+        color (string): the color (hex coded)
         event_time (array): array of formatted date and time
         url (string): the issue url
     """
@@ -143,15 +146,16 @@ def send_message_to_teams(event, last_event_description, impacted_services, colo
             "@type": "OpenUri", "name": "Go to Issue", "targets": [{"os": "default", "uri": url}]
         }]
     }
-    send_message_to_webhook(TEAMS_HOOK_URL, message)
+    post_message(TEAMS_HOOK_URL, message)
 
-def send_message_to_slack(event, last_event_description, impacted_services, color, event_time, url):
+def prepare_message_for_slack(event, last_event_description, impacted_services, color, event_time, url):
     """ send the message to slack
 
     Args:
         event (dictionary): the event
         last_event_description (string): the latest event description
-        c (string): the color (hex coded)
+        impacted_services (string): the impacted services (pre-formatted)
+        color (string): the color (hex coded)
         event_time (array): array of formatted date and time
         url (string): the issue url
     """
@@ -203,18 +207,16 @@ def send_message_to_slack(event, last_event_description, impacted_services, colo
             ]}
         ]}
     ]}
-    send_message_to_webhook(SLACK_HOOK_URL, message)
+    post_message(SLACK_HOOK_URL, message)
 
-def send_message_to_webhook(url, message):
+def post_message(url, message):
     """ send the message to the designated webhook url
 
     Args:
         url (string): the destination url
         message (dictionary): the message
     """
-    request = Request(
-        url,
-        json.dumps(message).encode('utf-8'))
+    request = Request(url, json.dumps(message).encode('utf-8'))
     try:
         response = urlopen(request)
         response.read()
