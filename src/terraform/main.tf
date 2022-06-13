@@ -33,7 +33,7 @@ terraform {
 
     backend "s3" {
         bucket         = "rearc-terraform-state-bucket-275279264324-us-east-1"
-        key            = "state/terraform.tfstate"
+        key            = "aws-health/state/terraform.tfstate"
         region         = "us-east-1"
         encrypt        = true
         kms_key_id     = "alias/rearc-terraform-state-bucket-key"
