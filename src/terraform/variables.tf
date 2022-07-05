@@ -106,3 +106,14 @@ variable "execution_rate" {
         error_message = "The execution_rate must be between 1 and 60 minutes."
     }
 }
+
+variable "error_email" {
+    description = "The email address to be notified in case of execution errors."
+    type        = string
+    default     = ""
+
+    validation {
+        condition     = can(regex("^$|^[\\w\\.]+\\@[\\w]+\\.[a-z]+$", var.error_email))
+        error_message = "The error_email must empty or a valid email address."
+    }
+}

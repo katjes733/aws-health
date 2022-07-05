@@ -216,6 +216,7 @@ Resources:
         ZipFile: |
           import json, os, logging, boto3, re
           from datetime import timedelta
+          from datetime import datetime
           from urllib.request import Request, urlopen
           from urllib.error import URLError, HTTPError
           from dateutil import parser
@@ -264,7 +265,7 @@ Resources:
                   c = "ff0000" if ev['statusCode']=="open" else "00ff00"
                   dt_f = ev['lastUpdatedTime'].strftime('%Y-%m-%d %H:%M:%S').split(' ')
                   eL = eD['eventDescription']['latestDescription'].split('\n')
-                  lED = list(filter(lambda e: re.search(r"^\[.*\].*", e), eL))[-1]
+                  lED = sorted(list(filter(lambda e: re.search(r"^\[(\d{2}:\d{2} [APM]{2}).*", e), eL)), key = lambda e: datetime.strptime(re.search(r"^\[(\d{2}:\d{2} [APM]{2})", e).group(1), "%I:%M %p"))[-1]
                   iSD = list(filter(lambda e: re.search(r"^The following AWS services.*", e), eL))
                   iS = event['service']
                   if iSD:

@@ -28,6 +28,7 @@ import os
 import logging
 import re
 from datetime import timedelta
+from datetime import datetime
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from dateutil import parser
@@ -92,8 +93,9 @@ def prepare_message(event_detail):
         color = "ff0000" if event['statusCode']=="open" else "00ff00"
         event_time = event['lastUpdatedTime'].strftime('%Y-%m-%d %H:%M:%S').split(' ')
         event_list = event_detail['eventDescription']['latestDescription'].split('\n')
-        last_event_description = list(filter(lambda entry: re.search(r"^\[.*\].*", entry), \
-            event_list))[-1]
+        last_event_description = sorted(list(filter(lambda entry: re.search(r"^\[(\d{2}:\d{2} [APM]{2}).*", entry), \
+            event_list)), key = lambda entry: datetime.strptime(re.search( \
+                r"^\[(\d{2}:\d{2} [APM]{2})", entry).group(1), "%I:%M %p"))[-1]
         impacted_services_descriptions = list(filter(lambda entry: \
             re.search(r"^The following AWS services.*", entry), event_list))
         impacted_services = event['service']
@@ -113,7 +115,8 @@ def prepare_message(event_detail):
     else:
         logger.info("Neither Teams nor Slack URL are set; therefore no further processing")
 
-def prepare_message_for_teams(event, last_event_description, impacted_services, color, event_time, url):
+def prepare_message_for_teams(event, last_event_description, \
+    impacted_services, color, event_time, url):
     """ send the message to teams
 
     Args:
@@ -148,7 +151,8 @@ def prepare_message_for_teams(event, last_event_description, impacted_services, 
     }
     post_message(TEAMS_HOOK_URL, message)
 
-def prepare_message_for_slack(event, last_event_description, impacted_services, color, event_time, url):
+def prepare_message_for_slack(event, last_event_description, \
+    impacted_services, color, event_time, url):
     """ send the message to slack
 
     Args:

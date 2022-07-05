@@ -158,3 +158,39 @@ resource "aws_lambda_permission" "aws_health_notification_lambda_permission" {
     principal     = "events.amazonaws.com"
     source_arn    = "${aws_cloudwatch_event_rule.aws_health_notification_event_rule_on_schedule.arn}"
 }
+
+resource "aws_sns_topic" "aws_health_notification_lambda_log_error_topic" {
+    count = var.error_email != "" ? 1 : 0
+    name  = "${local.aws_health_notification_lambda_function_name}-LogError-Topic"
+}
+
+resource "aws_sns_topic_subscription" "aws_health_notification_lambda_log_error_topic_email_subscription" {
+    count     = var.error_email != "" ? 1 : 0
+    topic_arn = aws_sns_topic.aws_health_notification_lambda_log_error_topic[count.index].arn
+    protocol  = "email"
+    endpoint  = var.error_email
+}
+
+resource "aws_cloudwatch_log_metric_filter" "aws_health_notification_lambda_log_error_metric_filter" {
+    name           = "${local.aws_health_notification_lambda_function_name}-LogError-MetricFilter"
+    log_group_name = aws_cloudwatch_log_group.aws_health_notification_lambda_log_group.name
+    pattern        = "ERROR"
+    metric_transformation {
+        name      = "LogErrorMetric"
+        namespace = "${local.aws_health_notification_lambda_function_name}"
+        value     = "1"
+    }
+}
+
+resource "aws_cloudwatch_metric_alarm" "aws_health_notification_lambda_log_error_alarm" {
+    alarm_name          = "${local.aws_health_notification_lambda_function_name}-LogError-Alarm"
+    metric_name         = aws_cloudwatch_log_metric_filter.aws_health_notification_lambda_log_error_metric_filter.name
+    threshold           = "0"
+    statistic           = "Sum"
+    comparison_operator = "GreaterThanThreshold"
+    datapoints_to_alarm = "1"
+    evaluation_periods  = "1"
+    period              = "60"
+    namespace           = "${local.aws_health_notification_lambda_function_name}"
+    alarm_actions       = var.error_email != "" ? [aws_sns_topic.aws_health_notification_lambda_log_error_topic[0].arn] : []    
+}

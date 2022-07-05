@@ -36,3 +36,5 @@ teams_hook_url = ""
 slack_hook_url = ""
 
 execution_rate = 1
+
+error_email = "martin.macecek@rearc.io"
