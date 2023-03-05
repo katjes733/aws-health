@@ -36,7 +36,7 @@ import boto3
 
 TEAMS_HOOK_URL = os.getenv('TeamsHookUrl')
 SLACK_HOOK_URL = os.getenv('SlackHookUrl')
-DEFAULT_CHECK_INTERVAL = 10
+DEFAULT_CHECK_INTERVAL = '10'
 CHECK_INTERVAL = int(os.getenv('CheckTime', DEFAULT_CHECK_INTERVAL))
 
 levels = {

@@ -214,15 +214,15 @@ Resources:
           - x86_64
       Code: 
         ZipFile: |
-          import json, os, logging, boto3, re
+          import json, os, logging, boto3, re, datetime
           from datetime import timedelta
           from urllib.request import Request, urlopen
           from urllib.error import URLError, HTTPError
           from dateutil import parser
 
-          THU = os.environ['TeamsHookUrl']
-          SHU = os.environ['SlackHookUrl']
-          CI = int(os.environ['CheckTime'])
+          THU = os.getenv('TeamsHookUrl')
+          SHU = os.getenv('SlackHookUrl')
+          CI = int(os.getenv('CheckTime', '10'))
 
           levels = {
               'critical': logging.CRITICAL,
@@ -240,21 +240,24 @@ Resources:
           def lambda_handler(event, context):
               logger.info("event: %s", event)
               if event and "detail" in event and event['detail']:
-                  prep_message(event['detail'])
+                  prep_msg(event['detail'])
               else:
                   hClient = boto3.client('health')
-                  toDt = parser.parse(event['time'])
-                  fromDt = toDt - timedelta(minutes=CI)
-                  allEvents = hClient.describe_events(filter={'eventTypeCategories': ['issue'], 'lastUpdatedTimes': [{'from': fromDt, 'to': toDt}]})['events']
+                  if event and "time" in event:
+                      now = parser.parse(event['time'])
+                  else:
+                      now = datetime.now()
+                  start = now - timedelta(minutes=CI)
+                  allEvents = hClient.describe_events(filter={'eventTypeCategories': ['issue'], 'lastUpdatedTimes': [{'from': start, 'to': now}]})['events']
                   eventArns = list(map(lambda event: event['arn'],[x for x in allEvents if "eventScopeCode" in x and x['eventScopeCode'] == "PUBLIC"]))
                   if eventArns:
                       eDs = hClient.describe_event_details(eventArns=eventArns)['successfulSet']
                       for eD in eDs:
-                          prep_message(eD)
+                          prep_msg(eD)
                   else:
                       logger.info("No new events and therefore nothing to send")
 
-          def prep_message(eD):
+          def prep_msg(eD):
               logger.info("eventDetail: %s", eD)
               if THU or SHU:
                   if "event" in eD:
@@ -273,14 +276,14 @@ Resources:
                       iS = f"{iSE[0]}:\n• {iSL}"
                   iUrl = f"https://phd.aws.amazon.com/phd/home?region={ev['region']}#/dashboard/open-issues?eventID={ev['arn']}&eventTab=details"
                   if THU:
-                      prep_message_teams(ev, lED, iS, c, dt_f, iUrl)
+                      prep_msg_teams(ev, lED, iS, c, dt_f, iUrl)
                   if SHU:
-                      prep_message_slack(ev, lED, iS, c, dt_f, iUrl)
+                      prep_msg_slack(ev, lED, iS, c, dt_f, iUrl)
               else:
                   logger.info("No Teams or Slack URL; no further processing")
 
-          def prep_message_teams(ev, lED, iS, c, dt_f, iUrl):
-              message = {
+          def prep_msg_teams(ev, lED, iS, c, dt_f, iUrl):
+              msg = {
                   "@context": "https://schema.org/extensions",
                   "@type": "MessageCard",
                   "themeColor": f"{c}",
@@ -302,10 +305,10 @@ Resources:
                       "@type": "OpenUri", "name": "Go to Issue", "targets": [{"os": "default", "uri": iUrl}]
                   }]
               }
-              post_message(THU, message)
+              post_msg(THU, msg)
 
-          def prep_message_slack(ev, lED, iS, c, dt_f, iUrl):
-              message = {
+          def prep_msg_slack(ev, lED, iS, c, dt_f, iUrl):
+              msg = {
                   "attachments": [
                       {
                           "color": c,
@@ -335,10 +338,10 @@ Resources:
                       }
                   ]
               }
-              post_message(SHU, message)
+              post_msg(SHU, msg)
 
-          def post_message(url, message):
-              request = Request(url, json.dumps(message).encode('utf-8'))
+          def post_msg(url, msg):
+              request = Request(url, json.dumps(msg).encode('utf-8'))
               try:
                   response = urlopen(request)
                   response.read()
