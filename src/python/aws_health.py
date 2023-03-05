@@ -27,15 +27,17 @@ import json
 import os
 import logging
 import re
+import datetime
 from datetime import timedelta
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from dateutil import parser
 import boto3
 
-TEAMS_HOOK_URL = os.environ['TeamsHookUrl']
-SLACK_HOOK_URL = os.environ['SlackHookUrl']
-CHECK_INTERVAL = int(os.environ['CheckTime'])
+TEAMS_HOOK_URL = os.getenv('TeamsHookUrl')
+SLACK_HOOK_URL = os.getenv('SlackHookUrl')
+DEFAULT_CHECK_INTERVAL = 10
+CHECK_INTERVAL = int(os.getenv('CheckTime', DEFAULT_CHECK_INTERVAL))
 
 levels = {
     'critical': logging.CRITICAL,
@@ -64,7 +66,10 @@ def lambda_handler(event, context):
         prepare_message(event['detail'])
     else:
         health_client = boto3.client('health')
-        now = parser.parse(event['time'])
+        if event and "time" in event:
+            now = parser.parse(event['time'])
+        else:
+            now = datetime.now()
         start_time = now - timedelta(minutes=CHECK_INTERVAL)
         all_events = health_client.describe_events(
             filter={'eventTypeCategories': ['issue'],
