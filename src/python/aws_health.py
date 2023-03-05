@@ -47,8 +47,9 @@ levels = {
 logger = logging.getLogger()
 try:
     logger.setLevel(levels.get(os.getenv('LOG_LEVEL', 'info').lower()))
-except KeyError as e:
+except KeyError:
     logger.setLevel(logging.INFO)
+
 
 def lambda_handler(event, context):
     """ Entry function for invocation in Lambda
@@ -65,17 +66,23 @@ def lambda_handler(event, context):
         health_client = boto3.client('health')
         now = parser.parse(event['time'])
         start_time = now - timedelta(minutes=CHECK_INTERVAL)
-        all_events = health_client.describe_events(filter={'eventTypeCategories': ['issue'], \
-            'lastUpdatedTimes': [{'from': start_time, 'to': now}]})['events']
-        event_arns = list(map(lambda event: event['arn'],[x for x in all_events \
-            if "eventScopeCode" in x and x['eventScopeCode'] == "PUBLIC"]))
+        all_events = health_client.describe_events(
+            filter={'eventTypeCategories': ['issue'],
+                    'lastUpdatedTimes': [{'from': start_time, 'to': now}]}
+            )['events']
+        event_arns = \
+            list(map(lambda event: event['arn'], [x for x in all_events
+                 if "eventScopeCode" in x and
+                 x['eventScopeCode'] == "PUBLIC"]))
         if event_arns:
             event_details = \
-                health_client.describe_event_details(eventArns=event_arns)['successfulSet']
+                health_client.describe_event_details(
+                    eventArns=event_arns)['successfulSet']
             for event_detail in event_details:
                 prepare_message(event_detail)
         else:
             logger.info("No new events and therefore nothing to send")
+
 
 def prepare_message(event_detail):
     """ Sends a message
@@ -89,31 +96,60 @@ def prepare_message(event_detail):
             event = event_detail['event']
         else:
             event = event_detail
-        color = "ff0000" if event['statusCode']=="open" else "00ff00"
-        event_time = event['lastUpdatedTime'].strftime('%Y-%m-%d %H:%M:%S').split(' ')
-        event_list = event_detail['eventDescription']['latestDescription'].split('\n')
-        last_event_description = list(filter(lambda entry: re.search(r"^\[.*\].*", entry), \
-            event_list))[-1]
-        impacted_services_descriptions = list(filter(lambda entry: \
-            re.search(r"^The following AWS services.*", entry), event_list))
+        color = "ff0000" if event['statusCode'] == "open" else "00ff00"
+        event_time = \
+            event['lastUpdatedTime'].strftime('%Y-%m-%d %H:%M:%S').split(' ')
+        event_list = \
+            event_detail['eventDescription']['latestDescription'].split('\n')
+        last_event_description = \
+            list(filter(lambda entry: re.search(r"^\[.*\].*", entry),
+                        event_list))[-1]
+        impacted_services_descriptions = \
+            list(filter(lambda entry:
+                 re.search(r"^The following AWS services.*", entry),
+                 event_list))
         impacted_services = event['service']
         if impacted_services_descriptions:
-            impacted_services_elements = re.split(r':\s?', impacted_services_descriptions[-1])
-            impacted_services_list = re.sub(r',\s?', '\n• ', \
-                impacted_services_elements[1].replace(".", ""))
-            impacted_services = f"{impacted_services_elements[0]}:\n• {impacted_services_list}"
-        url = f"https://phd.aws.amazon.com/phd/home?region=" \
-            f"{event['region']}#/dashboard/open-issues?eventID={event['arn']}&eventTab=details"
+            impacted_services_elements = \
+                re.split(r':\s?', impacted_services_descriptions[-1])
+            impacted_services_list = \
+                re.sub(r',\s?', '\n• ',
+                       impacted_services_elements[1].replace(".", ""))
+            impacted_services = \
+                f"{impacted_services_elements[0]}:\n• {impacted_services_list}"
+        url = (
+            f"https://phd.aws.amazon.com/phd/home?region="
+            f"{event['region']}#/dashboard/open-issues?eventID={event['arn']}&"
+            f"eventTab=details")
         if TEAMS_HOOK_URL:
-            prepare_message_for_teams(event, last_event_description, \
-                impacted_services, color, event_time, url)
+            prepare_message_for_teams(
+                event,
+                last_event_description,
+                impacted_services,
+                color,
+                event_time,
+                url)
         if SLACK_HOOK_URL:
-            prepare_message_for_slack(event, last_event_description, \
-                impacted_services, color, event_time, url)
+            prepare_message_for_slack(
+                event,
+                last_event_description,
+                impacted_services,
+                color,
+                event_time,
+                url)
     else:
-        logger.info("Neither Teams nor Slack URL are set; therefore no further processing")
+        logger.info(
+            "Neither Teams nor Slack URL are set; "
+            "therefore no further processing")
 
-def prepare_message_for_teams(event, last_event_description, impacted_services, color, event_time, url):
+
+def prepare_message_for_teams(
+        event,
+        last_event_description,
+        impacted_services,
+        color,
+        event_time,
+        url):
     """ send the message to teams
 
     Args:
@@ -128,27 +164,41 @@ def prepare_message_for_teams(event, last_event_description, impacted_services, 
         "@context": "https://schema.org/extensions",
         "@type": "MessageCard",
         "themeColor": f"{color}",
-        "title": f"{event['statusCode'].capitalize()} Health Notification for {event['service']}",
+        "title": (f"{event['statusCode'].capitalize()} Health Notification "
+                  f"for {event['service']}"),
         "sections": [{
-            "activityTitle": f"**{event['eventTypeCode']}** is in Status **{event['statusCode']}**",
+            "activityTitle": (f"**{event['eventTypeCode']}** is in Status "
+                              f"**{event['statusCode']}**"),
             "activitySubtitle": f"{event_time[0]}, {event_time[1]} UTC",
             "facts": [
                 {"name": "Service:", "value": f"{event['service']}"},
                 {"name": "Region:", "value": f"{event['region']}"},
-                {"name": "Event Type Code:", "value": f"{event['eventTypeCode']}"},
+                {"name": "Event Type Code:",
+                 "value": f"{event['eventTypeCode']}"},
                 {"name": "Status:", "value": f"{event['statusCode']}"},
-                {"name": "Latest Description:", "value": f"{last_event_description}"},
-                {"name": "Affected AWS Services:", "value": f"{impacted_services}"}
+                {"name": "Latest Description:",
+                 "value": f"{last_event_description}"},
+                {"name": "Affected AWS Services:",
+                 "value": f"{impacted_services}"}
             ]
         }],
         "summary": f"Service {event['eventTypeCode']}",
-        "potentialAction" : [{
-            "@type": "OpenUri", "name": "Go to Issue", "targets": [{"os": "default", "uri": url}]
+        "potentialAction": [{
+            "@type": "OpenUri",
+            "name": "Go to Issue",
+            "targets": [{"os": "default", "uri": url}]
         }]
     }
     post_message(TEAMS_HOOK_URL, message)
 
-def prepare_message_for_slack(event, last_event_description, impacted_services, color, event_time, url):
+
+def prepare_message_for_slack(
+        event,
+        last_event_description,
+        impacted_services,
+        color,
+        event_time,
+        url):
     """ send the message to slack
 
     Args:
@@ -165,16 +215,19 @@ def prepare_message_for_slack(event, last_event_description, impacted_services, 
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": \
-                    f"{event['statusCode'].capitalize()} Health Notification for {event['service']}"
+                "text":
+                    f"{event['statusCode'].capitalize()} Health Notification "
+                    f"for {event['service']}"
             }}, {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*{event['eventTypeCode']}* is in Status *{event['statusCode']}*"
+                "text": f"*{event['eventTypeCode']}* is in Status "
+                        f"*{event['statusCode']}*"
             }}, {
             "type": "context",
-            "elements": [{"type": "mrkdwn", "text": f"{event_time[0]}, {event_time[1]} UTC"}]
+            "elements": [{"type": "mrkdwn", "text": f"{event_time[0]}, "
+                                                    f"{event_time[1]} UTC"}]
             }, {
             "type": "divider"
             }, {
@@ -195,7 +248,7 @@ def prepare_message_for_slack(event, last_event_description, impacted_services, 
                 {"type": "mrkdwn", "text": f"{impacted_services}"}
             ]}, {
             "type": "divider"
-            },{
+            }, {
             "type": "actions",
             "elements": [{
                 "type": "button",
@@ -208,6 +261,7 @@ def prepare_message_for_slack(event, last_event_description, impacted_services, 
         ]}
     ]}
     post_message(SLACK_HOOK_URL, message)
+
 
 def post_message(url, message):
     """ send the message to the designated webhook url
